@@ -56,7 +56,8 @@ sequenceDiagram
 
 ## Demo
 
-[Watch the demo video](ova-demo.mp4)
+https://github.com/user-attachments/assets/73eafef7-82f6-4fb4-8676-f993861fb735
+
 
 ## Pre-requisites
 
