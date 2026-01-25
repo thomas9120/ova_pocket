@@ -8,14 +8,29 @@ from kokoro import KPipeline
 import nemo.collections.asr as nemo_asr
 import numpy as np
 from ollama import chat
+from qwen_tts import Qwen3TTSModel
 import soxr
 import torch
-
 
 SR = 24000
 
 # 'a' => US/American English
 tts_pipeline = KPipeline(lang_code='a', repo_id="hexgrad/Kokoro-82M")
+
+tts_model = Qwen3TTSModel.from_pretrained(
+    "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+    device_map="cuda:0",
+    dtype=torch.bfloat16,
+)
+
+with open("profiles/dua/ref_text.txt", "r", encoding="utf-8") as f:
+    ref_text = f.read().strip()
+
+prompt_items = tts_model.create_voice_clone_prompt(
+    ref_audio="profiles/dua/ref_audio.wav",
+    ref_text=ref_text,
+    x_vector_only_mode=False,
+)
 
 chat_model = "ministral-3:3b-instruct-2512-q4_K_M"
 
@@ -32,6 +47,9 @@ When responding **ALWAYS** follow these instructions:
   - **DO NOT** include any Markdown formatting, asterisks, underscores, hashes, or other formatting.
   - **DO NOT** include emojis.
 """
+
+with open("profiles/dua/profile.txt", "r", encoding="utf-8") as f:
+    CHAT_SYSTEM_PROMPT = f.read().strip()
 
 context = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
 
@@ -194,25 +212,33 @@ app.add_middleware(
 async def chat_request_handler(request: Request):
     audio_bytes = await request.body()
     transcribed_text = transcribe(asr_model, audio_bytes)
-    
+
     if not transcribed_text:
         # Return empty audio if no transcription
         empty_arr = np.array([], dtype=np.float32)
         wav_bytes = numpy_to_wav_bytes(empty_arr, SR)
         return Response(content=wav_bytes, media_type="audio/wav")
-        
+
     # Get LLM response
     llm_response = _chat(transcribed_text)
-        
+
     # Generate TTS audio
-    generator = tts_pipeline(llm_response, voice='af_heart')
-        
-    chunks = []
-    for _, _, audio in generator:
-        audio = np.asarray(audio, dtype=np.float32)
-        if audio.size > 0:
-            chunks.append(audio)
-        
-    arr = np.concatenate(chunks) if chunks else np.array([], dtype=np.float32)
-    wav_bytes = numpy_to_wav_bytes(arr, SR)
+    #generator = tts_pipeline(llm_response, voice='af_heart')
+
+    #chunks = []
+    #for _, _, audio in generator:
+    #    audio = np.asarray(audio, dtype=np.float32)
+    #    if audio.size > 0:
+    #        chunks.append(audio)
+
+    #arr = np.concatenate(chunks) if chunks else np.array([], dtype=np.float32)
+
+    wavs, sr = tts_model.generate_voice_clone(
+        text=llm_response,
+        language="English",
+        voice_clone_prompt=prompt_items,
+    )
+
+    #wav_bytes = numpy_to_wav_bytes(arr, SR)
+    wav_bytes = numpy_to_wav_bytes(wavs[0], sr)
     return Response(content=wav_bytes, media_type="audio/wav")
