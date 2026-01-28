@@ -5,8 +5,10 @@ import wave
 from kokoro import KPipeline
 import nemo.collections.asr as nemo_asr
 import numpy as np
-from ollama import chat
+from ollama import chat as ollama_chat
+from pocket_tts import TTSModel as PocketTTSModel
 from qwen_tts import Qwen3TTSModel
+import requests
 import torch
 
 from .audio import numpy_to_wav_bytes, resample
@@ -20,26 +22,64 @@ VOICE_CLONE_TTS_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 DEFAULT_CHAT_MODEL = "ministral-3:3b-instruct-2512-q4_K_M"
 DEFAULT_ASR_MODEL = "nvidia/parakeet-tdt-0.6b-v3"
 
+POCKET_TTS_VOICES = ["alba", "marius", "javert", "jean", "fantine", "cosette", "eponine", "azelma"]
+DEFAULT_POCKET_TTS_VOICE = "alba"
+
+DEFAULT_KOBOLDCPP_URL = "http://localhost:5001"
+
 
 class OVAProfile(str, Enum):
     DEFAULT = "default"
     DUA = "dua"
 
 
+class TTSEngine(str, Enum):
+    KOKORO = "kokoro"
+    POCKET_TTS = "pocket_tts"
+    QWEN3_VOICE_CLONE = "qwen3_voice_clone"
+
+
+class LLMBackend(str, Enum):
+    OLLAMA = "ollama"
+    KOBOLDCPP = "koboldcpp"
+
+
 class OVAPipeline:
-    def __init__(self, profile: OVAProfile | str):
+    def __init__(
+        self,
+        profile: OVAProfile | str,
+        tts_engine: TTSEngine | str = TTSEngine.KOKORO,
+        llm_backend: LLMBackend | str = LLMBackend.OLLAMA,
+        llm_model: str | None = None,
+        koboldcpp_url: str = DEFAULT_KOBOLDCPP_URL,
+        pocket_tts_voice: str = DEFAULT_POCKET_TTS_VOICE,
+    ):
         try:
             self.profile = OVAProfile(profile)
         except ValueError:
             logger.warning(f"Unknown OVA profile '{profile}', defaulting to DEFAULT")
             self.profile = OVAProfile.DEFAULT
-        
-        self.tts = {
-            OVAProfile.DEFAULT: self._tts,
-            OVAProfile.DUA: self._tts_with_voice_clone,
-        }[self.profile]
+
+        try:
+            self._tts_engine = TTSEngine(tts_engine)
+        except ValueError:
+            logger.warning(f"Unknown TTS engine '{tts_engine}', defaulting to KOKORO")
+            self._tts_engine = TTSEngine.KOKORO
+
+        try:
+            self._llm_backend = LLMBackend(llm_backend)
+        except ValueError:
+            logger.warning(f"Unknown LLM backend '{llm_backend}', defaulting to OLLAMA")
+            self._llm_backend = LLMBackend.OLLAMA
 
         self.device = get_device()
+
+        # LLM configuration
+        self.chat_model = llm_model or DEFAULT_CHAT_MODEL
+        self.koboldcpp_url = koboldcpp_url.rstrip("/")
+
+        # Pocket-TTS voice
+        self._pocket_tts_voice = pocket_tts_voice if pocket_tts_voice in POCKET_TTS_VOICES else DEFAULT_POCKET_TTS_VOICE
 
         # prep for loading assistant profile / prompt
         profile_dir = f"profiles/{self.profile.value}"
@@ -49,37 +89,143 @@ class OVAPipeline:
 
         self.context = [{"role": "system", "content": self.system_prompt}]
 
-        # initialize TTS
-        if self.tts.__name__ == "_tts_with_voice_clone":  # voice cloning
-            self.tts_model = Qwen3TTSModel.from_pretrained(
+        # initialize TTS models (lazy — only load the active engine)
+        self._kokoro_model = None
+        self._pocket_tts_model = None
+        self._pocket_tts_voice_states = {}
+        self._qwen_model = None
+        self._voice_clone_prompt_items = None
+
+        self._init_tts_engine(profile_dir)
+
+        # initialize ASR
+        self.asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name=DEFAULT_ASR_MODEL)
+
+    # ------------------------------------------------------------------
+    # TTS engine management
+    # ------------------------------------------------------------------
+
+    def _init_tts_engine(self, profile_dir: str | None = None):
+        """Load the currently selected TTS engine's model."""
+        if self._tts_engine == TTSEngine.KOKORO:
+            self._ensure_kokoro()
+        elif self._tts_engine == TTSEngine.POCKET_TTS:
+            self._ensure_pocket_tts()
+        elif self._tts_engine == TTSEngine.QWEN3_VOICE_CLONE:
+            self._ensure_qwen(profile_dir)
+
+    def _ensure_kokoro(self):
+        if self._kokoro_model is None:
+            logger.info("Loading Kokoro TTS model...")
+            self._kokoro_model = KPipeline(lang_code='a', repo_id=DEFAULT_TTS_MODEL)
+            # warm up
+            self._kokoro_model("Just testing!", voice=DEFAULT_TTS_VOICE)
+            logger.info("Kokoro TTS model loaded.")
+
+    def _ensure_pocket_tts(self):
+        if self._pocket_tts_model is None:
+            logger.info("Loading Pocket-TTS model...")
+            self._pocket_tts_model = PocketTTSModel.load_model()
+            logger.info("Pocket-TTS model loaded.")
+        # Pre-load current voice state if not cached
+        self._get_pocket_tts_voice_state(self._pocket_tts_voice)
+
+    def _get_pocket_tts_voice_state(self, voice: str):
+        """Get or cache a Pocket-TTS voice state."""
+        if voice not in self._pocket_tts_voice_states:
+            logger.info(f"Loading Pocket-TTS voice: {voice}")
+            self._pocket_tts_voice_states[voice] = self._pocket_tts_model.get_state_for_audio_prompt(voice)
+        return self._pocket_tts_voice_states[voice]
+
+    def _ensure_qwen(self, profile_dir: str | None = None):
+        if self._qwen_model is None:
+            logger.info("Loading Qwen3-TTS voice clone model...")
+            self._qwen_model = Qwen3TTSModel.from_pretrained(
                 VOICE_CLONE_TTS_MODEL,
                 device_map=self.device,
                 dtype=torch.bfloat16,
             )
+            logger.info("Qwen3-TTS model loaded.")
 
-            with open(f"{profile_dir}/ref_text.txt", "r", encoding="utf-8") as f:
-                ref_text = f.read().strip()
+        if self._voice_clone_prompt_items is None and profile_dir is not None:
+            try:
+                with open(f"{profile_dir}/ref_text.txt", "r", encoding="utf-8") as f:
+                    ref_text = f.read().strip()
 
-            self.voice_clone_prompt_items = self.tts_model.create_voice_clone_prompt(
-                ref_audio=f"{profile_dir}/ref_audio.wav",
-                ref_text=ref_text,
-                x_vector_only_mode=False,
-            )
-        else:  # default / super-fast TTS
-            self.tts_model = KPipeline(lang_code='a', repo_id=DEFAULT_TTS_MODEL)  # 'a' => US/American English
+                self._voice_clone_prompt_items = self._qwen_model.create_voice_clone_prompt(
+                    ref_audio=f"{profile_dir}/ref_audio.wav",
+                    ref_text=ref_text,
+                    x_vector_only_mode=False,
+                )
+            except FileNotFoundError:
+                logger.warning(f"Voice clone reference files not found in {profile_dir}. "
+                               "Qwen3 voice clone will not work without ref_audio.wav and ref_text.txt.")
 
-            # warm up
-            self.tts_model("Just testing!", voice=DEFAULT_TTS_VOICE)
-        
-        # initialize ASR
-        self.asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name=DEFAULT_ASR_MODEL)
+    @property
+    def tts_engine(self) -> TTSEngine:
+        return self._tts_engine
 
-        # initialize chat model
-        self.chat_model = DEFAULT_CHAT_MODEL
+    @property
+    def llm_backend(self) -> LLMBackend:
+        return self._llm_backend
 
+    @property
+    def pocket_tts_voice(self) -> str:
+        return self._pocket_tts_voice
 
-    def _tts(self, text: str) -> bytes:
-        generator = self.tts_model(text, voice=DEFAULT_TTS_VOICE)
+    def set_tts_engine(self, engine: TTSEngine | str):
+        """Switch the active TTS engine at runtime."""
+        try:
+            engine = TTSEngine(engine)
+        except ValueError:
+            raise ValueError(f"Unknown TTS engine: {engine}")
+
+        self._tts_engine = engine
+        profile_dir = f"profiles/{self.profile.value}"
+        self._init_tts_engine(profile_dir)
+        logger.info(f"TTS engine switched to: {engine.value}")
+
+    def set_pocket_tts_voice(self, voice: str):
+        """Change the Pocket-TTS voice."""
+        if voice not in POCKET_TTS_VOICES:
+            raise ValueError(f"Unknown Pocket-TTS voice: {voice}. Available: {POCKET_TTS_VOICES}")
+        self._pocket_tts_voice = voice
+        if self._pocket_tts_model is not None:
+            self._get_pocket_tts_voice_state(voice)
+        logger.info(f"Pocket-TTS voice changed to: {voice}")
+
+    def set_llm_backend(self, backend: LLMBackend | str, model: str | None = None, koboldcpp_url: str | None = None):
+        """Switch the LLM backend at runtime."""
+        try:
+            backend = LLMBackend(backend)
+        except ValueError:
+            raise ValueError(f"Unknown LLM backend: {backend}")
+
+        self._llm_backend = backend
+        if model is not None:
+            self.chat_model = model
+        if koboldcpp_url is not None:
+            self.koboldcpp_url = koboldcpp_url.rstrip("/")
+        logger.info(f"LLM backend switched to: {backend.value} (model: {self.chat_model})")
+
+    # ------------------------------------------------------------------
+    # TTS methods
+    # ------------------------------------------------------------------
+
+    def tts(self, text: str) -> bytes:
+        """Route to the active TTS engine."""
+        if self._tts_engine == TTSEngine.KOKORO:
+            return self._tts_kokoro(text)
+        elif self._tts_engine == TTSEngine.POCKET_TTS:
+            return self._tts_pocket(text)
+        elif self._tts_engine == TTSEngine.QWEN3_VOICE_CLONE:
+            return self._tts_qwen_voice_clone(text)
+        else:
+            raise ValueError(f"No TTS handler for engine: {self._tts_engine}")
+
+    def _tts_kokoro(self, text: str) -> bytes:
+        self._ensure_kokoro()
+        generator = self._kokoro_model(text, voice=DEFAULT_TTS_VOICE)
 
         chunks = []
         for _, _, audio in generator:
@@ -88,23 +234,34 @@ class OVAPipeline:
                 chunks.append(audio)
 
         arr = np.concatenate(chunks) if chunks else np.array([], dtype=np.float32)
+        return numpy_to_wav_bytes(arr, sr=DEFAULT_SR)
 
-        wav_bytes = numpy_to_wav_bytes(arr, sr=DEFAULT_SR)
+    def _tts_pocket(self, text: str) -> bytes:
+        self._ensure_pocket_tts()
+        voice_state = self._get_pocket_tts_voice_state(self._pocket_tts_voice)
+        audio_tensor = self._pocket_tts_model.generate_audio(voice_state, text)
+        arr = audio_tensor.numpy()
+        sr = self._pocket_tts_model.sample_rate
+        return numpy_to_wav_bytes(arr, sr=sr)
 
-        return wav_bytes
+    def _tts_qwen_voice_clone(self, text: str) -> bytes:
+        profile_dir = f"profiles/{self.profile.value}"
+        self._ensure_qwen(profile_dir)
 
+        if self._voice_clone_prompt_items is None:
+            raise RuntimeError("Voice clone prompt not initialized. Ensure ref_audio.wav and ref_text.txt "
+                               f"exist in profiles/{self.profile.value}/")
 
-    def _tts_with_voice_clone(self, text: str) -> bytes:
-        wavs, sr = self.tts_model.generate_voice_clone(
+        wavs, sr = self._qwen_model.generate_voice_clone(
             text=text,
             language="English",
-            voice_clone_prompt=self.voice_clone_prompt_items,
+            voice_clone_prompt=self._voice_clone_prompt_items,
         )
+        return numpy_to_wav_bytes(wavs[0], sr)
 
-        wav_bytes = numpy_to_wav_bytes(wavs[0], sr)
-
-        return wav_bytes
-
+    # ------------------------------------------------------------------
+    # ASR
+    # ------------------------------------------------------------------
 
     def transcribe(self, wav_bytes: bytes) -> str:
         with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
@@ -179,19 +336,71 @@ class OVAPipeline:
 
         return ""
 
+    # ------------------------------------------------------------------
+    # LLM chat
+    # ------------------------------------------------------------------
 
     def chat(self, text: str) -> str:
+        """Route to the active LLM backend."""
+        if self._llm_backend == LLMBackend.OLLAMA:
+            return self._chat_ollama(text)
+        elif self._llm_backend == LLMBackend.KOBOLDCPP:
+            return self._chat_koboldcpp(text)
+        else:
+            raise ValueError(f"No chat handler for backend: {self._llm_backend}")
+
+    def _strip_markdown(self, text: str) -> str:
+        return text.replace("**", "").replace("_", "").replace("__", "").replace("#", "").strip()
+
+    def _chat_ollama(self, text: str) -> str:
         self.context.append({"role": "user", "content": text})
 
-        response = chat(
+        response = ollama_chat(
             model=self.chat_model,
             messages=self.context,
             think=False,
             stream=False,
         )
 
-        response = response.message.content.replace("**", "").replace("_", "").replace("__", "").replace("#", "").strip()
+        response_text = self._strip_markdown(response.message.content)
+        self.context.append({"role": "assistant", "content": response_text})
+        return response_text
 
-        self.context.append({"role": "assistant", "content": response})
+    def _chat_koboldcpp(self, text: str) -> str:
+        self.context.append({"role": "user", "content": text})
 
-        return response
+        url = f"{self.koboldcpp_url}/v1/chat/completions"
+        payload = {
+            "model": self.chat_model,
+            "messages": self.context,
+            "stream": False,
+        }
+
+        try:
+            resp = requests.post(url, json=payload, timeout=120)
+            resp.raise_for_status()
+            data = resp.json()
+            response_text = self._strip_markdown(data["choices"][0]["message"]["content"])
+        except requests.RequestException as e:
+            logger.error(f"Koboldcpp request failed: {e}")
+            # Remove the user message we just added since we failed
+            self.context.pop()
+            raise RuntimeError(f"Koboldcpp request failed: {e}") from e
+
+        self.context.append({"role": "assistant", "content": response_text})
+        return response_text
+
+    # ------------------------------------------------------------------
+    # Configuration snapshot (for the API)
+    # ------------------------------------------------------------------
+
+    def get_config(self) -> dict:
+        return {
+            "profile": self.profile.value,
+            "tts_engine": self._tts_engine.value,
+            "pocket_tts_voice": self._pocket_tts_voice,
+            "pocket_tts_voices": POCKET_TTS_VOICES,
+            "llm_backend": self._llm_backend.value,
+            "llm_model": self.chat_model,
+            "koboldcpp_url": self.koboldcpp_url,
+        }

@@ -1,6 +1,6 @@
 [project]
 name = "ova"
-version = "0.1.0"
+version = "0.2.0"
 description = "Outrageous Voice Assistant - Fully local end-to-end voice assistant pipeline using open weight models."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -17,4 +17,6 @@ dependencies = [
     "pip>=25.2",
     "qwen-tts>=0.0.5",
     "cuda-python>=12.3",
+    "pocket-tts>=0.2.0",
+    "requests>=2.32.0",
 ]

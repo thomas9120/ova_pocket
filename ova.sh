@@ -16,25 +16,45 @@ BACKEND_PORT=5173
 FRONTEND_PORT=8000
 
 OVA_PROFILE="${OVA_PROFILE:-default}"
+OVA_TTS_ENGINE="${OVA_TTS_ENGINE:-kokoro}"
+OVA_LLM_BACKEND="${OVA_LLM_BACKEND:-ollama}"
+OVA_LLM_MODEL="${OVA_LLM_MODEL:-}"
+OVA_KOBOLDCPP_URL="${OVA_KOBOLDCPP_URL:-http://localhost:5001}"
+OVA_POCKET_TTS_VOICE="${OVA_POCKET_TTS_VOICE:-alba}"
 
 CHAT_MODEL="ministral-3:3b-instruct-2512-q4_K_M"
-HF_MODELS=("hexgrad/Kokoro-82M" "nvidia/parakeet-tdt-0.6b-v3" "Qwen/Qwen3-TTS-12Hz-1.7B-Base")
+
+# HF models mapped by component
+HF_MODEL_ASR="nvidia/parakeet-tdt-0.6b-v3"
+HF_MODEL_KOKORO="hexgrad/Kokoro-82M"
+HF_MODEL_QWEN="Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 
 usage() {
   cat <<'EOF'
 Usage: ova [OPTIONS] <command>
 
-Options:
-  OVA_PROFILE=<profile>  Set the profile to use (default: default)
+Environment variables:
+  OVA_PROFILE=<profile>              Set the profile to use (default: default)
+  OVA_TTS_ENGINE=<engine>            TTS engine: kokoro, pocket_tts, qwen3_voice_clone (default: kokoro)
+  OVA_LLM_BACKEND=<backend>         LLM backend: ollama, koboldcpp (default: ollama)
+  OVA_LLM_MODEL=<model>             LLM model name (default: auto per backend)
+  OVA_KOBOLDCPP_URL=<url>           Koboldcpp API URL (default: http://localhost:5001)
+  OVA_POCKET_TTS_VOICE=<voice>      Pocket-TTS voice: alba, marius, javert, jean, fantine, cosette, eponine, azelma (default: alba)
 
 Commands:
-  install   Sync uv environment and fetch models
-  start     Start backend + frontend server (non-blocking)
-  stop      Stop running services
-  help      Show this message
+  install        Install deps + download only the models needed for
+                 your chosen OVA_TTS_ENGINE and OVA_LLM_BACKEND
+  install --all  Install deps + download ALL models (every engine)
+  start          Start backend + frontend server (non-blocking)
+  stop           Stop running services
+  help           Show this message
 
-Example:
-  OVA_PROFILE=dua ova start
+Examples:
+  ./ova.sh install                                        # only kokoro + ollama models (defaults)
+  OVA_TTS_ENGINE=pocket_tts ./ova.sh install              # only pocket-tts + ollama models
+  ./ova.sh install --all                                  # everything
+  OVA_TTS_ENGINE=pocket_tts OVA_POCKET_TTS_VOICE=jean ./ova.sh start
+  OVA_LLM_BACKEND=koboldcpp OVA_LLM_MODEL=my-model ./ova.sh start
 EOF
 }
 
@@ -248,36 +268,88 @@ ensure_ollama_model() {
   ollama pull "$model"
 }
 
-ensure_hf_models() {
+ensure_hf_model() {
+  local repo_id=$1
   ensure_cmd uvx
   local cache_list
   cache_list="$(uvx hf cache list 2>/dev/null || true)"
-  for repo_id in "${HF_MODELS[@]}"; do
-    if [[ -n "$cache_list" ]] && echo "$cache_list" | grep -Fq "$repo_id"; then
-      echo "HF model present: $repo_id"
-    else
-      echo "Downloading HF model: $repo_id"
-      uvx hf download "$repo_id"
-    fi
-  done
+  if [[ -n "$cache_list" ]] && echo "$cache_list" | grep -Fq "$repo_id"; then
+    echo "HF model present: $repo_id"
+  else
+    echo "Downloading HF model: $repo_id"
+    uvx hf download "$repo_id"
+  fi
+}
+
+ensure_pocket_tts() {
+  echo "Pre-warming Pocket-TTS model cache..."
+  uv run python3 -c "
+from pocket_tts import TTSModel
+model = TTSModel.load_model()
+state = model.get_state_for_audio_prompt('alba')
+print('Pocket-TTS model cached successfully.')
+" 2>/dev/null && echo "Pocket-TTS ready." || echo "Pocket-TTS pre-warm skipped (will download on first use)."
+}
+
+install_models() {
+  local install_all=${1:-false}
+
+  # ASR model is always needed
+  ensure_hf_model "$HF_MODEL_ASR"
+
+  # TTS models — only download what's needed (or everything with --all)
+  if [[ "$install_all" == "true" || "$OVA_TTS_ENGINE" == "kokoro" ]]; then
+    ensure_hf_model "$HF_MODEL_KOKORO"
+  fi
+  if [[ "$install_all" == "true" || "$OVA_TTS_ENGINE" == "qwen3_voice_clone" ]]; then
+    ensure_hf_model "$HF_MODEL_QWEN"
+  fi
+  if [[ "$install_all" == "true" || "$OVA_TTS_ENGINE" == "pocket_tts" ]]; then
+    ensure_pocket_tts
+  fi
+
+  # LLM models — only pull Ollama model when using Ollama (or --all)
+  if [[ "$install_all" == "true" || "$OVA_LLM_BACKEND" == "ollama" ]]; then
+    ensure_cmd ollama
+    ensure_ollama_model "$CHAT_MODEL"
+  fi
 }
 
 cmd="${1:-help}"
+subcmd="${2:-}"
 
 case "$cmd" in
   install)
     ensure_cmd uv
-    ensure_cmd ollama
     ensure_uv_lock
+
+    echo "Installing Python dependencies..."
     uv sync --frozen
     ensure_pip
-    ensure_ollama_model "$CHAT_MODEL"
-    ensure_hf_models
+
+    install_all="false"
+    if [[ "$subcmd" == "--all" ]]; then
+      install_all="true"
+      echo "Installing ALL models (every engine)..."
+    else
+      echo "Installing models for: TTS=$OVA_TTS_ENGINE, LLM=$OVA_LLM_BACKEND"
+      echo "(use './ova.sh install --all' to download everything)"
+    fi
+
+    install_models "$install_all"
+    echo "Install complete."
     ;;
   start)
     ensure_cmd uv
     ensure_uv_lock
     echo "Starting Outrageous Voice Assistant..."
+    echo "  Profile:        $OVA_PROFILE"
+    echo "  TTS Engine:     $OVA_TTS_ENGINE"
+    echo "  LLM Backend:    $OVA_LLM_BACKEND"
+    [[ -n "$OVA_LLM_MODEL" ]] && echo "  LLM Model:      $OVA_LLM_MODEL"
+    [[ "$OVA_TTS_ENGINE" == "pocket_tts" ]] && echo "  Pocket-TTS Voice: $OVA_POCKET_TTS_VOICE"
+    [[ "$OVA_LLM_BACKEND" == "koboldcpp" ]] && echo "  Koboldcpp URL:  $OVA_KOBOLDCPP_URL"
+
     echo "Starting front-end..."
     if is_running "$FRONTEND_PID"; then
       if port_open "$FRONTEND_PORT"; then
@@ -301,7 +373,7 @@ case "$cmd" in
       fi
     else
       start_detached "$BACKEND_LOG" "$BACKEND_PID" "$BACKEND_GROUP" \
-        bash -c "OVA_PROFILE='$OVA_PROFILE' uv run uvicorn ova.api:app --reload --port \"$BACKEND_PORT\""
+        bash -c "OVA_PROFILE='$OVA_PROFILE' OVA_TTS_ENGINE='$OVA_TTS_ENGINE' OVA_LLM_BACKEND='$OVA_LLM_BACKEND' OVA_LLM_MODEL='$OVA_LLM_MODEL' OVA_KOBOLDCPP_URL='$OVA_KOBOLDCPP_URL' OVA_POCKET_TTS_VOICE='$OVA_POCKET_TTS_VOICE' uv run uvicorn ova.api:app --reload --port \"$BACKEND_PORT\""
       wait_for_log_message "Backend" "$BACKEND_LOG" "$BACKEND_PID" \
         "Application startup complete." 60 1 \
         "Back-end started successfully (port $BACKEND_PORT)"

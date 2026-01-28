@@ -22,19 +22,71 @@
         font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
         background: radial-gradient(1200px 800px at 30% 20%, #f2f2f6 0%, var(--bg) 55%, #dfe0e6 100%);
         color: var(--text);
-        display: grid;
-        place-items: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
       }
 
+      /* ---- Settings panel ---- */
+      .settings-bar {
+        width: min(620px, 96vw);
+        padding: 16px 20px;
+        margin-top: 18px;
+        border-radius: 18px;
+        background: linear-gradient(145deg, #f2f2f6, #d8d9df);
+        box-shadow:
+          8px 8px 20px var(--shadow-dark),
+          -8px -8px 20px var(--shadow-light);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: flex-end;
+      }
+
+      .settings-bar .field {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        flex: 1 1 140px;
+        min-width: 120px;
+      }
+
+      .settings-bar label {
+        font-size: 11px;
+        font-weight: 650;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .settings-bar select,
+      .settings-bar input[type="text"] {
+        padding: 7px 10px;
+        border: 1px solid rgba(0,0,0,0.10);
+        border-radius: 10px;
+        background: rgba(255,255,255,0.55);
+        font-size: 13px;
+        font-family: inherit;
+        color: var(--text);
+        outline: none;
+        transition: border-color 150ms;
+      }
+      .settings-bar select:focus,
+      .settings-bar input[type="text"]:focus {
+        border-color: var(--accent);
+      }
+
+      /* ---- Main stage ---- */
       .stage {
         width: min(520px, 92vw);
         display: grid;
         place-items: center;
         padding: 28px;
+        flex: 1;
       }
 
       .talk {
-        --size: min(360px, 78vw);
+        --size: min(320px, 72vw);
         width: var(--size);
         height: var(--size);
         border-radius: 999px;
@@ -140,9 +192,115 @@
 
       .talk.state-playing .wave { display: flex; }
       .talk.state-playing .icon { display: none; }
+
+      /* ---- Text input area ---- */
+      .text-input-area {
+        width: min(620px, 96vw);
+        padding: 0 20px 20px;
+        display: flex;
+        gap: 10px;
+        align-items: stretch;
+      }
+
+      .text-input-area input[type="text"] {
+        flex: 1;
+        padding: 12px 16px;
+        border: 1px solid rgba(0,0,0,0.10);
+        border-radius: 14px;
+        background: rgba(255,255,255,0.55);
+        font-size: 15px;
+        font-family: inherit;
+        color: var(--text);
+        outline: none;
+        transition: border-color 150ms;
+        box-shadow:
+          inset 2px 2px 6px var(--shadow-dark),
+          inset -2px -2px 6px var(--shadow-light);
+      }
+      .text-input-area input[type="text"]:focus {
+        border-color: var(--accent);
+      }
+
+      .text-input-area button {
+        padding: 12px 22px;
+        border: 0;
+        border-radius: 14px;
+        background: linear-gradient(145deg, #f2f2f6, #d8d9df);
+        box-shadow:
+          4px 4px 10px var(--shadow-dark),
+          -4px -4px 10px var(--shadow-light);
+        font-size: 14px;
+        font-weight: 650;
+        font-family: inherit;
+        color: var(--text);
+        cursor: pointer;
+        transition: transform 80ms ease, box-shadow 120ms ease;
+        white-space: nowrap;
+      }
+      .text-input-area button:active {
+        transform: scale(0.97);
+      }
+      .text-input-area button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      /* ---- Response text display ---- */
+      .response-text {
+        width: min(620px, 96vw);
+        padding: 0 20px 18px;
+        font-size: 14px;
+        color: var(--muted);
+        text-align: center;
+        min-height: 20px;
+        word-break: break-word;
+      }
+
+      /* ---- Koboldcpp fields (shown/hidden) ---- */
+      .kobold-fields { display: none; }
+      .kobold-fields.visible { display: contents; }
     </style>
   </head>
   <body>
+
+    <!-- Settings bar -->
+    <div class="settings-bar" id="settingsBar">
+      <div class="field">
+        <label for="ttsEngine">TTS Engine</label>
+        <select id="ttsEngine">
+          <option value="kokoro">Kokoro (fast)</option>
+          <option value="pocket_tts">Pocket-TTS</option>
+          <option value="qwen3_voice_clone">Qwen3 Voice Clone</option>
+        </select>
+      </div>
+
+      <div class="field" id="voiceField">
+        <label for="voiceSelect">Voice</label>
+        <select id="voiceSelect"></select>
+      </div>
+
+      <div class="field">
+        <label for="llmBackend">LLM Backend</label>
+        <select id="llmBackend">
+          <option value="ollama">Ollama</option>
+          <option value="koboldcpp">Koboldcpp</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="llmModel">LLM Model</label>
+        <input type="text" id="llmModel" placeholder="e.g. mistral:latest" />
+      </div>
+
+      <div class="kobold-fields" id="koboldFields">
+        <div class="field">
+          <label for="koboldUrl">Koboldcpp URL</label>
+          <input type="text" id="koboldUrl" placeholder="http://localhost:5001" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Main talk button -->
     <main class="stage">
       <button id="talkBtn" class="talk state-idle" type="button" aria-label="Tap to talk">
         <div class="icon" aria-hidden="true">
@@ -163,14 +321,145 @@
       </button>
     </main>
 
+    <!-- Response text -->
+    <div class="response-text" id="responseText"></div>
+
+    <!-- Text input -->
+    <div class="text-input-area">
+      <input type="text" id="textInput" placeholder="Type a message instead of speaking..." />
+      <button id="sendTextBtn" type="button">Send</button>
+    </div>
+
     <script>
-      const API_URL = "http://localhost:5173/chat"; // adjust if needed
+      const API_BASE = "http://localhost:5173";
+      const API_URL = `${API_BASE}/chat`;
 
       const btn = document.getElementById("talkBtn");
       const labelEl = document.getElementById("label");
       const subEl = document.getElementById("sub");
+      const responseTextEl = document.getElementById("responseText");
+
+      // Settings elements
+      const ttsEngineEl = document.getElementById("ttsEngine");
+      const voiceSelectEl = document.getElementById("voiceSelect");
+      const voiceFieldEl = document.getElementById("voiceField");
+      const llmBackendEl = document.getElementById("llmBackend");
+      const llmModelEl = document.getElementById("llmModel");
+      const koboldFieldsEl = document.getElementById("koboldFields");
+      const koboldUrlEl = document.getElementById("koboldUrl");
+
+      // Text input elements
+      const textInputEl = document.getElementById("textInput");
+      const sendTextBtn = document.getElementById("sendTextBtn");
 
       let currentAudio = null;
+      let voices = {};
+
+      // ---- Load config and voices on startup ----
+
+      async function loadConfig() {
+        try {
+          const [configRes, voicesRes] = await Promise.all([
+            fetch(`${API_BASE}/config`),
+            fetch(`${API_BASE}/voices`),
+          ]);
+          const config = await configRes.json();
+          voices = await voicesRes.json();
+
+          ttsEngineEl.value = config.tts_engine;
+          llmBackendEl.value = config.llm_backend;
+          llmModelEl.value = config.llm_model || "";
+          koboldUrlEl.value = config.koboldcpp_url || "http://localhost:5001";
+
+          updateVoiceDropdown(config.tts_engine, config.pocket_tts_voice);
+          updateKoboldVisibility();
+        } catch (e) {
+          console.warn("Could not load config:", e);
+        }
+      }
+
+      function updateVoiceDropdown(engine, selectedVoice) {
+        voiceSelectEl.innerHTML = "";
+        const engineVoices = voices[engine] || [];
+
+        if (engineVoices.length === 0) {
+          voiceFieldEl.style.display = "none";
+          return;
+        }
+
+        voiceFieldEl.style.display = "";
+        for (const v of engineVoices) {
+          const opt = document.createElement("option");
+          opt.value = v;
+          opt.textContent = v;
+          voiceSelectEl.appendChild(opt);
+        }
+
+        if (selectedVoice && engineVoices.includes(selectedVoice)) {
+          voiceSelectEl.value = selectedVoice;
+        }
+      }
+
+      function updateKoboldVisibility() {
+        if (llmBackendEl.value === "koboldcpp") {
+          koboldFieldsEl.classList.add("visible");
+        } else {
+          koboldFieldsEl.classList.remove("visible");
+        }
+      }
+
+      // ---- Settings change handlers ----
+
+      async function pushConfig(body) {
+        try {
+          const res = await fetch(`${API_BASE}/config`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const config = await res.json();
+          if (config.errors && config.errors.length) {
+            console.warn("Config errors:", config.errors);
+          }
+          return config;
+        } catch (e) {
+          console.error("Failed to push config:", e);
+          return null;
+        }
+      }
+
+      ttsEngineEl.addEventListener("change", async () => {
+        const engine = ttsEngineEl.value;
+        const config = await pushConfig({ tts_engine: engine });
+        if (config) {
+          updateVoiceDropdown(engine, config.pocket_tts_voice);
+        }
+      });
+
+      voiceSelectEl.addEventListener("change", async () => {
+        const engine = ttsEngineEl.value;
+        if (engine === "pocket_tts") {
+          await pushConfig({ pocket_tts_voice: voiceSelectEl.value });
+        }
+      });
+
+      llmBackendEl.addEventListener("change", async () => {
+        updateKoboldVisibility();
+        await pushConfig({ llm_backend: llmBackendEl.value });
+      });
+
+      // Push LLM model on Enter or blur
+      llmModelEl.addEventListener("change", async () => {
+        const val = llmModelEl.value.trim();
+        if (val) await pushConfig({ llm_model: val });
+      });
+
+      koboldUrlEl.addEventListener("change", async () => {
+        const val = koboldUrlEl.value.trim();
+        if (val) await pushConfig({ koboldcpp_url: val });
+      });
+
+      // ---- State management ----
 
       function setState(state, { label, sub, ariaLabel } = {}) {
         btn.classList.remove("state-idle", "state-recording", "state-waiting", "state-playing");
@@ -179,6 +468,8 @@
         if (sub != null) subEl.textContent = sub;
         if (ariaLabel != null) btn.setAttribute("aria-label", ariaLabel);
       }
+
+      // ---- Audio helpers ----
 
       function flattenFloat32(chunks) {
         const total = chunks.reduce((sum, c) => sum + c.length, 0);
@@ -228,10 +519,39 @@
         return buffer;
       }
 
-      async function fetchAndPlayTts(wavBlob) {
-        setState("waiting", { label: "Sending…", sub: "Waiting for response", ariaLabel: "Waiting for response" });
+      // ---- Play audio response ----
 
-        // Stop any previous playback
+      function playAudioBlob(blob, chatResponseText) {
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        currentAudio = audio;
+
+        if (chatResponseText) {
+          responseTextEl.textContent = chatResponseText;
+        }
+
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          if (currentAudio === audio) currentAudio = null;
+          setState("idle", { label: "Tap to talk", sub: "Tap again to send", ariaLabel: "Tap to talk" });
+        };
+        audio.onerror = () => {
+          URL.revokeObjectURL(url);
+          setState("idle", { label: "Tap to talk", sub: "Audio playback failed.", ariaLabel: "Tap to talk" });
+        };
+
+        audio.play().then(() => {
+          setState("playing", { label: "Playing...", sub: "Tap to interrupt", ariaLabel: "Playing audio" });
+        }).catch(() => {
+          setState("idle", { label: "Tap to talk", sub: "Playback blocked by the browser.", ariaLabel: "Tap to talk" });
+        });
+      }
+
+      // ---- Voice chat flow ----
+
+      async function fetchAndPlayTts(wavBlob) {
+        setState("waiting", { label: "Sending...", sub: "Waiting for response", ariaLabel: "Waiting for response" });
+
         if (currentAudio) {
           currentAudio.pause();
           currentAudio = null;
@@ -249,28 +569,60 @@
         }
 
         const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
+        playAudioBlob(blob);
+      }
 
-        const audio = new Audio(url);
-        currentAudio = audio;
+      // ---- Text chat flow ----
 
-        audio.onended = () => {
-          URL.revokeObjectURL(url);
-          if (currentAudio === audio) currentAudio = null;
-          setState("idle", { label: "Tap to talk", sub: "Tap again to send", ariaLabel: "Tap to talk" });
-        };
-        audio.onerror = () => {
-          URL.revokeObjectURL(url);
-          setState("idle", { label: "Tap to talk", sub: "Audio playback failed.", ariaLabel: "Tap to talk" });
-        };
+      async function sendTextMessage(text) {
+        if (!text.trim()) return;
+
+        setState("waiting", { label: "Processing...", sub: "Generating response", ariaLabel: "Processing text" });
+        textInputEl.disabled = true;
+        sendTextBtn.disabled = true;
+
+        if (currentAudio) {
+          currentAudio.pause();
+          currentAudio = null;
+        }
 
         try {
-          await audio.play(); // should succeed because triggered by user gesture
-          setState("playing", { label: "Playing…", sub: "Tap to interrupt", ariaLabel: "Playing audio" });
-        } catch (e) {
-          setState("idle", { label: "Tap to talk", sub: "Playback blocked by the browser.", ariaLabel: "Tap to talk" });
+          const res = await fetch(`${API_BASE}/chat/text`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: text.trim() }),
+          });
+
+          if (!res.ok) {
+            setState("idle", { label: "Tap to talk", sub: `Error: ${res.status}`, ariaLabel: "Tap to talk" });
+            return;
+          }
+
+          const chatResponse = res.headers.get("X-Chat-Response") || "";
+          const blob = await res.blob();
+          textInputEl.value = "";
+          playAudioBlob(blob, chatResponse);
+        } catch (err) {
+          setState("idle", { label: "Tap to talk", sub: "Request failed", ariaLabel: "Tap to talk" });
+        } finally {
+          textInputEl.disabled = false;
+          sendTextBtn.disabled = false;
+          textInputEl.focus();
         }
       }
+
+      sendTextBtn.addEventListener("click", () => {
+        sendTextMessage(textInputEl.value);
+      });
+
+      textInputEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          sendTextMessage(textInputEl.value);
+        }
+      });
+
+      // ---- Recording ----
 
       let recording = null;
 
@@ -302,7 +654,7 @@
           zeroGain.connect(audioContext.destination);
 
           recording = { stream, audioContext, source, processor, zeroGain, chunks };
-          setState("recording", { label: "Listening…", sub: "Tap to stop & send", ariaLabel: "Recording audio" });
+          setState("recording", { label: "Listening...", sub: "Tap to stop & send", ariaLabel: "Recording audio" });
         } catch (err) {
           setState("idle", { label: "Tap to talk", sub: "Mic permission denied", ariaLabel: "Tap to talk" });
         }
@@ -340,7 +692,7 @@
           return;
         }
 
-        setState("waiting", { label: "Processing…", sub: "Sending audio", ariaLabel: "Sending audio" });
+        setState("waiting", { label: "Processing...", sub: "Sending audio", ariaLabel: "Sending audio" });
         const wavBlob = await stopRecording();
         if (!wavBlob) {
           setState("idle", { label: "Tap to talk", sub: "Tap again to send", ariaLabel: "Tap to talk" });
@@ -353,6 +705,9 @@
           setState("idle", { label: "Tap to talk", sub: "Request failed", ariaLabel: "Tap to talk" });
         }
       });
+
+      // ---- Init ----
+      loadConfig();
     </script>
   </body>
 </html>
