@@ -16,6 +16,11 @@ BACKEND_PORT=5173
 FRONTEND_PORT=8000
 
 OVA_PROFILE="${OVA_PROFILE:-default}"
+OVA_TTS_ENGINE="${OVA_TTS_ENGINE:-kokoro}"
+OVA_LLM_BACKEND="${OVA_LLM_BACKEND:-ollama}"
+OVA_LLM_MODEL="${OVA_LLM_MODEL:-}"
+OVA_KOBOLDCPP_URL="${OVA_KOBOLDCPP_URL:-http://localhost:5001}"
+OVA_POCKET_TTS_VOICE="${OVA_POCKET_TTS_VOICE:-alba}"
 
 CHAT_MODEL="ministral-3:3b-instruct-2512-q4_K_M"
 HF_MODELS=("hexgrad/Kokoro-82M" "nvidia/parakeet-tdt-0.6b-v3" "Qwen/Qwen3-TTS-12Hz-1.7B-Base")
@@ -24,8 +29,13 @@ usage() {
   cat <<'EOF'
 Usage: ova [OPTIONS] <command>
 
-Options:
-  OVA_PROFILE=<profile>  Set the profile to use (default: default)
+Environment variables:
+  OVA_PROFILE=<profile>              Set the profile to use (default: default)
+  OVA_TTS_ENGINE=<engine>            TTS engine: kokoro, pocket_tts, qwen3_voice_clone (default: kokoro)
+  OVA_LLM_BACKEND=<backend>         LLM backend: ollama, koboldcpp (default: ollama)
+  OVA_LLM_MODEL=<model>             LLM model name (default: auto per backend)
+  OVA_KOBOLDCPP_URL=<url>           Koboldcpp API URL (default: http://localhost:5001)
+  OVA_POCKET_TTS_VOICE=<voice>      Pocket-TTS voice: alba, marius, javert, jean, fantine, cosette, eponine, azelma (default: alba)
 
 Commands:
   install   Sync uv environment and fetch models
@@ -33,8 +43,10 @@ Commands:
   stop      Stop running services
   help      Show this message
 
-Example:
+Examples:
   OVA_PROFILE=dua ova start
+  OVA_TTS_ENGINE=pocket_tts OVA_POCKET_TTS_VOICE=jean ova start
+  OVA_LLM_BACKEND=koboldcpp OVA_LLM_MODEL=my-model ova start
 EOF
 }
 
@@ -262,6 +274,17 @@ ensure_hf_models() {
   done
 }
 
+ensure_pocket_tts() {
+  echo "Pocket-TTS models are downloaded automatically on first use."
+  echo "Pre-warming Pocket-TTS model cache..."
+  uv run python3 -c "
+from pocket_tts import TTSModel
+model = TTSModel.load_model()
+state = model.get_state_for_audio_prompt('alba')
+print('Pocket-TTS model cached successfully.')
+" 2>/dev/null && echo "Pocket-TTS ready." || echo "Pocket-TTS pre-warm skipped (will download on first use)."
+}
+
 cmd="${1:-help}"
 
 case "$cmd" in
@@ -273,11 +296,19 @@ case "$cmd" in
     ensure_pip
     ensure_ollama_model "$CHAT_MODEL"
     ensure_hf_models
+    ensure_pocket_tts
     ;;
   start)
     ensure_cmd uv
     ensure_uv_lock
     echo "Starting Outrageous Voice Assistant..."
+    echo "  Profile:        $OVA_PROFILE"
+    echo "  TTS Engine:     $OVA_TTS_ENGINE"
+    echo "  LLM Backend:    $OVA_LLM_BACKEND"
+    [[ -n "$OVA_LLM_MODEL" ]] && echo "  LLM Model:      $OVA_LLM_MODEL"
+    [[ "$OVA_TTS_ENGINE" == "pocket_tts" ]] && echo "  Pocket-TTS Voice: $OVA_POCKET_TTS_VOICE"
+    [[ "$OVA_LLM_BACKEND" == "koboldcpp" ]] && echo "  Koboldcpp URL:  $OVA_KOBOLDCPP_URL"
+
     echo "Starting front-end..."
     if is_running "$FRONTEND_PID"; then
       if port_open "$FRONTEND_PORT"; then
@@ -301,7 +332,7 @@ case "$cmd" in
       fi
     else
       start_detached "$BACKEND_LOG" "$BACKEND_PID" "$BACKEND_GROUP" \
-        bash -c "OVA_PROFILE='$OVA_PROFILE' uv run uvicorn ova.api:app --reload --port \"$BACKEND_PORT\""
+        bash -c "OVA_PROFILE='$OVA_PROFILE' OVA_TTS_ENGINE='$OVA_TTS_ENGINE' OVA_LLM_BACKEND='$OVA_LLM_BACKEND' OVA_LLM_MODEL='$OVA_LLM_MODEL' OVA_KOBOLDCPP_URL='$OVA_KOBOLDCPP_URL' OVA_POCKET_TTS_VOICE='$OVA_POCKET_TTS_VOICE' uv run uvicorn ova.api:app --reload --port \"$BACKEND_PORT\""
       wait_for_log_message "Backend" "$BACKEND_LOG" "$BACKEND_PID" \
         "Application startup complete." 60 1 \
         "Back-end started successfully (port $BACKEND_PORT)"
