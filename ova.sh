@@ -23,7 +23,11 @@ OVA_KOBOLDCPP_URL="${OVA_KOBOLDCPP_URL:-http://localhost:5001}"
 OVA_POCKET_TTS_VOICE="${OVA_POCKET_TTS_VOICE:-alba}"
 
 CHAT_MODEL="ministral-3:3b-instruct-2512-q4_K_M"
-HF_MODELS=("hexgrad/Kokoro-82M" "nvidia/parakeet-tdt-0.6b-v3" "Qwen/Qwen3-TTS-12Hz-1.7B-Base")
+
+# HF models mapped by component
+HF_MODEL_ASR="nvidia/parakeet-tdt-0.6b-v3"
+HF_MODEL_KOKORO="hexgrad/Kokoro-82M"
+HF_MODEL_QWEN="Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 
 usage() {
   cat <<'EOF'
@@ -38,15 +42,19 @@ Environment variables:
   OVA_POCKET_TTS_VOICE=<voice>      Pocket-TTS voice: alba, marius, javert, jean, fantine, cosette, eponine, azelma (default: alba)
 
 Commands:
-  install   Sync uv environment and fetch models
-  start     Start backend + frontend server (non-blocking)
-  stop      Stop running services
-  help      Show this message
+  install        Install deps + download only the models needed for
+                 your chosen OVA_TTS_ENGINE and OVA_LLM_BACKEND
+  install --all  Install deps + download ALL models (every engine)
+  start          Start backend + frontend server (non-blocking)
+  stop           Stop running services
+  help           Show this message
 
 Examples:
-  OVA_PROFILE=dua ova start
-  OVA_TTS_ENGINE=pocket_tts OVA_POCKET_TTS_VOICE=jean ova start
-  OVA_LLM_BACKEND=koboldcpp OVA_LLM_MODEL=my-model ova start
+  ./ova.sh install                                        # only kokoro + ollama models (defaults)
+  OVA_TTS_ENGINE=pocket_tts ./ova.sh install              # only pocket-tts + ollama models
+  ./ova.sh install --all                                  # everything
+  OVA_TTS_ENGINE=pocket_tts OVA_POCKET_TTS_VOICE=jean ./ova.sh start
+  OVA_LLM_BACKEND=koboldcpp OVA_LLM_MODEL=my-model ./ova.sh start
 EOF
 }
 
@@ -260,22 +268,20 @@ ensure_ollama_model() {
   ollama pull "$model"
 }
 
-ensure_hf_models() {
+ensure_hf_model() {
+  local repo_id=$1
   ensure_cmd uvx
   local cache_list
   cache_list="$(uvx hf cache list 2>/dev/null || true)"
-  for repo_id in "${HF_MODELS[@]}"; do
-    if [[ -n "$cache_list" ]] && echo "$cache_list" | grep -Fq "$repo_id"; then
-      echo "HF model present: $repo_id"
-    else
-      echo "Downloading HF model: $repo_id"
-      uvx hf download "$repo_id"
-    fi
-  done
+  if [[ -n "$cache_list" ]] && echo "$cache_list" | grep -Fq "$repo_id"; then
+    echo "HF model present: $repo_id"
+  else
+    echo "Downloading HF model: $repo_id"
+    uvx hf download "$repo_id"
+  fi
 }
 
 ensure_pocket_tts() {
-  echo "Pocket-TTS models are downloaded automatically on first use."
   echo "Pre-warming Pocket-TTS model cache..."
   uv run python3 -c "
 from pocket_tts import TTSModel
@@ -285,18 +291,53 @@ print('Pocket-TTS model cached successfully.')
 " 2>/dev/null && echo "Pocket-TTS ready." || echo "Pocket-TTS pre-warm skipped (will download on first use)."
 }
 
+install_models() {
+  local install_all=${1:-false}
+
+  # ASR model is always needed
+  ensure_hf_model "$HF_MODEL_ASR"
+
+  # TTS models — only download what's needed (or everything with --all)
+  if [[ "$install_all" == "true" || "$OVA_TTS_ENGINE" == "kokoro" ]]; then
+    ensure_hf_model "$HF_MODEL_KOKORO"
+  fi
+  if [[ "$install_all" == "true" || "$OVA_TTS_ENGINE" == "qwen3_voice_clone" ]]; then
+    ensure_hf_model "$HF_MODEL_QWEN"
+  fi
+  if [[ "$install_all" == "true" || "$OVA_TTS_ENGINE" == "pocket_tts" ]]; then
+    ensure_pocket_tts
+  fi
+
+  # LLM models — only pull Ollama model when using Ollama (or --all)
+  if [[ "$install_all" == "true" || "$OVA_LLM_BACKEND" == "ollama" ]]; then
+    ensure_cmd ollama
+    ensure_ollama_model "$CHAT_MODEL"
+  fi
+}
+
 cmd="${1:-help}"
+subcmd="${2:-}"
 
 case "$cmd" in
   install)
     ensure_cmd uv
-    ensure_cmd ollama
     ensure_uv_lock
+
+    echo "Installing Python dependencies..."
     uv sync --frozen
     ensure_pip
-    ensure_ollama_model "$CHAT_MODEL"
-    ensure_hf_models
-    ensure_pocket_tts
+
+    install_all="false"
+    if [[ "$subcmd" == "--all" ]]; then
+      install_all="true"
+      echo "Installing ALL models (every engine)..."
+    else
+      echo "Installing models for: TTS=$OVA_TTS_ENGINE, LLM=$OVA_LLM_BACKEND"
+      echo "(use './ova.sh install --all' to download everything)"
+    fi
+
+    install_models "$install_all"
+    echo "Install complete."
     ;;
   start)
     ensure_cmd uv
