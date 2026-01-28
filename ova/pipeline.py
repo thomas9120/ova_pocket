@@ -214,6 +214,12 @@ class OVAPipeline:
             self.koboldcpp_url = koboldcpp_url.rstrip("/")
         logger.info(f"LLM backend switched to: {backend.value} (model: {self.chat_model})")
 
+    def set_system_prompt(self, prompt: str):
+        """Replace the system prompt and reset conversation context."""
+        self.system_prompt = prompt
+        self.context = [{"role": "system", "content": self.system_prompt}]
+        logger.info(f"System prompt updated ({len(prompt)} chars). Conversation context reset.")
+
     # ------------------------------------------------------------------
     # TTS methods
     # ------------------------------------------------------------------
@@ -270,12 +276,20 @@ class OVAPipeline:
     # ------------------------------------------------------------------
 
     def transcribe(self, wav_bytes: bytes) -> str:
+        if not wav_bytes or len(wav_bytes) < 44:
+            logger.warning("Received empty or too-short WAV data for transcription")
+            return ""
+
         with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
             num_channels = wf.getnchannels()
             sampwidth = wf.getsampwidth()
             src_sr = wf.getframerate()
             num_frames = wf.getnframes()
             pcm = wf.readframes(num_frames)
+
+        if num_frames == 0 or len(pcm) == 0:
+            logger.warning("WAV file has 0 frames")
+            return ""
 
         # PCM -> float32 in [-1, 1]
         if sampwidth == 1:
@@ -299,6 +313,10 @@ class OVAPipeline:
         # Resample to model SR
         model_sr = int(getattr(getattr(self.asr_model, "cfg", None), "sample_rate", DEFAULT_SR))
         audio = resample(audio, src_sr, model_sr)
+
+        if audio.size == 0:
+            logger.warning("Audio is empty after resampling")
+            return ""
 
         # Torch tensors on model device
         device = next(self.asr_model.parameters()).device
@@ -409,4 +427,5 @@ class OVAPipeline:
             "llm_backend": self._llm_backend.value,
             "llm_model": self.chat_model,
             "koboldcpp_url": self.koboldcpp_url,
+            "system_prompt": self.system_prompt,
         }
