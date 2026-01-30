@@ -1,0 +1,46 @@
+Voice Activity Detection (VAD) - Research Notes
+=================================================
+
+KoboldCpp does NOT expose a VAD endpoint via its API. Its built-in Lite
+UI implements VAD client-side in the browser, but there is no server-side
+VAD endpoint. VAD must be added separately.
+
+Currently, OVA has no silence trimming or speech detection. The full
+recording (including silence) is sent to the server and processed by ASR.
+
+
+Option A: Client-side VAD (recommended)
+---------------------------------------
+Library: @ricky0123/vad-web
+  - Runs Silero VAD (~1.8 MB ONNX model) in the browser via WASM
+  - Add via CDN script tags to index.html (no build tooling needed)
+  - onSpeechEnd callback gives trimmed Float32Array of speech only
+  - Enables hands-free conversation (no tap to start/stop)
+  - Reduces upload size and ASR processing time
+  - Zero new Python dependencies or server changes
+
+CDN usage:
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web/dist/bundle.min.js"></script>
+
+Docs: https://docs.vad.ricky0123.com/
+Repo: https://github.com/ricky0123/vad
+
+
+Option B: Server-side VAD (Python)
+----------------------------------
+Trim silence on the server before passing audio to NeMo ASR.
+
+Package options (all use Silero VAD model):
+
+  silero-vad (official)   - needs torch + torchaudio (torch already in project)
+  pysilero-vad            - ONNX only, no torch, ~20 MB
+  silero-vad-lite          - zero deps, bundles ONNX C++, ~15 MB
+  torch.hub (no package)  - uses existing torch, downloads model at runtime
+
+Repo: https://github.com/snakers4/silero-vad
+
+
+Option C: Both
+--------------
+Client-side for hands-free UX + server-side as secondary check.
