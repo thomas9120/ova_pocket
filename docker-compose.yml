@@ -1,0 +1,23 @@
+services:
+  ova:
+    build: .
+    ports:
+      - "8000:8000"   # Web UI
+      - "5173:5173"   # API backend
+    env_file: .env
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    # Allows the container to reach Ollama / KoboldCpp running on the host
+    # via http://host.docker.internal:<port>
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  hf-cache:

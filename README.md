@@ -96,6 +96,52 @@ Open your browser to **http://localhost:8000** and start talking (or typing).
 ./ova.sh stop
 ```
 
+## Docker (alternative)
+
+You can run OVA in a Docker container instead of installing locally. Ollama or KoboldCpp still run on the host.
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) with [Compose V2](https://docs.docker.com/compose/)
+- [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) (for GPU access)
+- Ollama and/or KoboldCpp running on the host
+
+### 1. Create a `.env` file
+
+```bash
+cp .env.example .env
+# Edit .env and add your HF_TOKEN and any other settings
+```
+
+When Ollama runs on the host, the container reaches it through `host.docker.internal`:
+
+```
+OLLAMA_HOST=http://host.docker.internal:11434
+```
+
+For KoboldCpp on the host:
+
+```
+OVA_LLM_BACKEND=koboldcpp
+OVA_KOBOLDCPP_URL=http://host.docker.internal:5001
+```
+
+### 2. Build and start
+
+```bash
+docker compose up --build
+```
+
+Open **http://localhost:8000** once both services are ready.
+
+HuggingFace models are stored in a Docker volume (`hf-cache`) so they only download once.
+
+### 3. Stop
+
+```bash
+docker compose down
+```
+
 ## Configuration
 
 All settings can be configured via environment variables at startup, and also changed live from the web UI settings bar.

@@ -1,0 +1,7 @@
+.venv
+.ova
+.env
+.git
+__pycache__
+*.pyc
+*.pyo
