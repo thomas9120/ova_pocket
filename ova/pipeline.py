@@ -216,6 +216,11 @@ class OVAPipeline:
         self.context = [{"role": "system", "content": self.system_prompt}]
         logger.info(f"System prompt updated ({len(prompt)} chars). Conversation context reset.")
 
+    def clear_context(self):
+        """Reset conversation context, keeping the current system prompt."""
+        self.context = [{"role": "system", "content": self.system_prompt}]
+        logger.info("Conversation context cleared.")
+
     # ------------------------------------------------------------------
     # Text chunking for TTS
     # ------------------------------------------------------------------

@@ -317,6 +317,22 @@
         <label for="systemPrompt">System Prompt</label>
         <textarea id="systemPrompt" rows="3" placeholder="e.g. You are a helpful assistant. Keep responses concise."></textarea>
       </div>
+
+      <div class="field" style="flex: 0 0 auto; min-width: auto; align-self: flex-end;">
+        <button id="clearChatBtn" type="button" style="
+          padding: 7px 14px;
+          border: 1px solid rgba(0,0,0,0.10);
+          border-radius: 10px;
+          background: rgba(255,255,255,0.55);
+          font-size: 13px;
+          font-weight: 650;
+          font-family: inherit;
+          color: var(--text);
+          cursor: pointer;
+          transition: transform 80ms ease;
+          white-space: nowrap;
+        ">New Chat</button>
+      </div>
     </div>
 
     <!-- Main talk button -->
@@ -487,6 +503,15 @@
       systemPromptEl.addEventListener("change", async () => {
         const val = systemPromptEl.value.trim();
         await pushConfig({ system_prompt: val });
+      });
+
+      document.getElementById("clearChatBtn").addEventListener("click", async () => {
+        try {
+          await fetch(`${API_BASE}/clear`, { method: "POST" });
+          responseTextEl.textContent = "Conversation cleared.";
+        } catch (e) {
+          console.error("Failed to clear conversation:", e);
+        }
       });
 
       // ---- State management ----
