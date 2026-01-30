@@ -269,6 +269,13 @@ Check the backend health endpoint (while running):
 curl -s http://localhost:5173/health | python3 -m json.tool
 ```
 
+Update to the latest version:
+
+```bash
+./ova.sh update             # Linux / macOS
+update.bat                  # Windows
+```
+
 Clean reinstall if things break:
 
 ```bash
