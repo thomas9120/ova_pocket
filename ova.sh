@@ -60,6 +60,7 @@ Commands:
   stop           Stop running services
   status         Show whether services are running
   logs           Tail backend + frontend logs (Ctrl-C to quit)
+  update         Pull latest code, update deps, re-check models
   uninstall      Stop services and remove .venv + .ova
   reinstall      Uninstall then install again from scratch
   help           Show this message
@@ -604,6 +605,37 @@ case "$cmd" in
     echo "globally and were not removed. To free disk space, run:"
     echo "  uvx hf cache delete"
     echo "  ollama rm $CHAT_MODEL"
+    ;;
+  update)
+    ensure_cmd git
+    ensure_cmd uv
+
+    was_running=false
+    if is_running "$BACKEND_PID" || is_running "$FRONTEND_PID"; then
+      was_running=true
+      echo "Stopping running services..."
+      stop_service "Backend" "$BACKEND_PID" "$BACKEND_GROUP"
+      stop_service "Web server" "$FRONTEND_PID" "$FRONTEND_GROUP"
+      echo ""
+    fi
+
+    echo "Pulling latest code..."
+    git pull
+    echo ""
+
+    echo "Updating Python dependencies..."
+    ensure_uv_lock
+    uv sync --frozen
+    echo ""
+
+    echo "Checking models..."
+    install_models "false"
+    echo ""
+
+    echo "Update complete."
+    if [[ "$was_running" == "true" ]]; then
+      echo "Services were stopped for the update. Run './ova.sh start' to restart."
+    fi
     ;;
   reinstall)
     echo "Reinstalling OVA..."
