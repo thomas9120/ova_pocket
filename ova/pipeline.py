@@ -23,9 +23,22 @@ from .utils import get_device, logger
 
 DEFAULT_SR = 24000  # default sample rate
 DEFAULT_TTS_MODEL = "hexgrad/Kokoro-82M"
-DEFAULT_TTS_VOICE = "af_heart"
 DEFAULT_CHAT_MODEL = "ministral-3:3b-instruct-2512-q4_K_M"
 DEFAULT_ASR_MODEL = "nvidia/parakeet-tdt-0.6b-v3"
+
+KOKORO_VOICES = [
+    # American English — Female
+    "af_heart", "af_alloy", "af_aoede", "af_bella", "af_jessica",
+    "af_kore", "af_nicole", "af_nova", "af_river", "af_sarah", "af_sky",
+    # American English — Male
+    "am_adam", "am_echo", "am_eric", "am_fenrir", "am_liam",
+    "am_michael", "am_onyx", "am_puck", "am_santa",
+    # British English — Female
+    "bf_alice", "bf_emma", "bf_isabella", "bf_lily",
+    # British English — Male
+    "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
+]
+DEFAULT_KOKORO_VOICE = "af_heart"
 
 POCKET_TTS_VOICES = ["alba", "marius", "javert", "jean", "fantine", "cosette", "eponine", "azelma"]
 DEFAULT_POCKET_TTS_VOICE = "alba"
@@ -56,6 +69,7 @@ class OVAPipeline:
         llm_backend: LLMBackend | str = LLMBackend.OLLAMA,
         llm_model: str | None = None,
         koboldcpp_url: str = DEFAULT_KOBOLDCPP_URL,
+        kokoro_voice: str = DEFAULT_KOKORO_VOICE,
         pocket_tts_voice: str = DEFAULT_POCKET_TTS_VOICE,
     ):
         try:
@@ -82,7 +96,8 @@ class OVAPipeline:
         self.chat_model = llm_model or DEFAULT_CHAT_MODEL
         self.koboldcpp_url = koboldcpp_url.rstrip("/")
 
-        # Pocket-TTS voice
+        # TTS voices
+        self._kokoro_voice = kokoro_voice if kokoro_voice in KOKORO_VOICES else DEFAULT_KOKORO_VOICE
         self._pocket_tts_voice = pocket_tts_voice if pocket_tts_voice in POCKET_TTS_VOICES else DEFAULT_POCKET_TTS_VOICE
 
         # prep for loading assistant profile / prompt
@@ -119,7 +134,7 @@ class OVAPipeline:
             logger.info("Loading Kokoro TTS model...")
             self._kokoro_model = KPipeline(lang_code='a', repo_id=DEFAULT_TTS_MODEL)
             # warm up
-            self._kokoro_model("Just testing!", voice=DEFAULT_TTS_VOICE)
+            self._kokoro_model("Just testing!", voice=self._kokoro_voice)
             logger.info("Kokoro TTS model loaded.")
 
     def _ensure_pocket_tts(self):
@@ -146,6 +161,10 @@ class OVAPipeline:
         return self._llm_backend
 
     @property
+    def kokoro_voice(self) -> str:
+        return self._kokoro_voice
+
+    @property
     def pocket_tts_voice(self) -> str:
         return self._pocket_tts_voice
 
@@ -160,6 +179,13 @@ class OVAPipeline:
         profile_dir = f"profiles/{self.profile.value}"
         self._init_tts_engine(profile_dir)
         logger.info(f"TTS engine switched to: {engine.value}")
+
+    def set_kokoro_voice(self, voice: str):
+        """Change the Kokoro voice."""
+        if voice not in KOKORO_VOICES:
+            raise ValueError(f"Unknown Kokoro voice: {voice}. Available: {KOKORO_VOICES}")
+        self._kokoro_voice = voice
+        logger.info(f"Kokoro voice changed to: {voice}")
 
     def set_pocket_tts_voice(self, voice: str):
         """Change the Pocket-TTS voice."""
@@ -221,7 +247,7 @@ class OVAPipeline:
 
     def _tts_kokoro(self, text: str) -> bytes:
         self._ensure_kokoro()
-        generator = self._kokoro_model(text, voice=DEFAULT_TTS_VOICE)
+        generator = self._kokoro_model(text, voice=self._kokoro_voice)
 
         chunks = []
         for _, _, audio in generator:
@@ -399,8 +425,8 @@ class OVAPipeline:
         return {
             "profile": self.profile.value,
             "tts_engine": self._tts_engine.value,
+            "kokoro_voice": self._kokoro_voice,
             "pocket_tts_voice": self._pocket_tts_voice,
-            "pocket_tts_voices": POCKET_TTS_VOICES,
             "llm_backend": self._llm_backend.value,
             "llm_model": self.chat_model,
             "koboldcpp_url": self.koboldcpp_url,
