@@ -153,6 +153,14 @@ async def update_config(update: ConfigUpdate):
     return JSONResponse(content=config)
 
 
+# ---------- Clear conversation ----------
+
+@app.post("/clear")
+async def clear_conversation():
+    pipeline.clear_context()
+    return JSONResponse(content={"status": "ok"})
+
+
 # ---------- Voices endpoint ----------
 
 @app.get("/voices")
