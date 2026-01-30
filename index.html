@@ -392,7 +392,8 @@
           koboldUrlEl.value = config.koboldcpp_url || "http://localhost:5001";
           systemPromptEl.value = config.system_prompt || "";
 
-          updateVoiceDropdown(config.tts_engine, config.pocket_tts_voice);
+          const currentVoice = config.tts_engine === "kokoro" ? config.kokoro_voice : config.pocket_tts_voice;
+          updateVoiceDropdown(config.tts_engine, currentVoice);
           updateKoboldVisibility();
         } catch (e) {
           console.warn("Could not load config:", e);
@@ -453,13 +454,16 @@
         const engine = ttsEngineEl.value;
         const config = await pushConfig({ tts_engine: engine });
         if (config) {
-          updateVoiceDropdown(engine, config.pocket_tts_voice);
+          const selectedVoice = engine === "kokoro" ? config.kokoro_voice : config.pocket_tts_voice;
+          updateVoiceDropdown(engine, selectedVoice);
         }
       });
 
       voiceSelectEl.addEventListener("change", async () => {
         const engine = ttsEngineEl.value;
-        if (engine === "pocket_tts") {
+        if (engine === "kokoro") {
+          await pushConfig({ kokoro_voice: voiceSelectEl.value });
+        } else if (engine === "pocket_tts") {
           await pushConfig({ pocket_tts_voice: voiceSelectEl.value });
         }
       });

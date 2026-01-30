@@ -106,10 +106,46 @@ All settings can be configured via environment variables at startup, and also ch
 |---|---|---|
 | `OVA_PROFILE` | `default` | Voice profile (`default` or `dua`) |
 | `OVA_TTS_ENGINE` | `kokoro` | TTS engine: `kokoro` or `pocket_tts` |
+| `OVA_KOKORO_VOICE` | `af_heart` | Kokoro voice (see below) |
 | `OVA_LLM_BACKEND` | `ollama` | LLM backend: `ollama` or `koboldcpp` |
 | `OVA_LLM_MODEL` | auto | LLM model name (e.g. `mistral:latest`) |
 | `OVA_KOBOLDCPP_URL` | `http://localhost:5001` | Koboldcpp API URL |
 | `OVA_POCKET_TTS_VOICE` | `alba` | Pocket-TTS voice (see below) |
+
+### Kokoro Voices
+
+Kokoro ships with 28 English voices. Prefix key: `af` = American Female, `am` = American Male, `bf` = British Female, `bm` = British Male.
+
+| Voice | Type |
+|---|---|
+| `af_heart` | American Female |
+| `af_alloy` | American Female |
+| `af_aoede` | American Female |
+| `af_bella` | American Female |
+| `af_jessica` | American Female |
+| `af_kore` | American Female |
+| `af_nicole` | American Female |
+| `af_nova` | American Female |
+| `af_river` | American Female |
+| `af_sarah` | American Female |
+| `af_sky` | American Female |
+| `am_adam` | American Male |
+| `am_echo` | American Male |
+| `am_eric` | American Male |
+| `am_fenrir` | American Male |
+| `am_liam` | American Male |
+| `am_michael` | American Male |
+| `am_onyx` | American Male |
+| `am_puck` | American Male |
+| `am_santa` | American Male |
+| `bf_alice` | British Female |
+| `bf_emma` | British Female |
+| `bf_isabella` | British Female |
+| `bf_lily` | British Female |
+| `bm_daniel` | British Male |
+| `bm_fable` | British Male |
+| `bm_george` | British Male |
+| `bm_lewis` | British Male |
 
 ### Pocket-TTS Voices
 

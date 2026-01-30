@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from .pipeline import OVAPipeline, POCKET_TTS_VOICES
+from .pipeline import OVAPipeline, KOKORO_VOICES, POCKET_TTS_VOICES
 from .utils import logger
 
 
@@ -15,6 +15,7 @@ OVA_TTS_ENGINE = os.getenv("OVA_TTS_ENGINE", "kokoro")
 OVA_LLM_BACKEND = os.getenv("OVA_LLM_BACKEND", "ollama")
 OVA_LLM_MODEL = os.getenv("OVA_LLM_MODEL", "")
 OVA_KOBOLDCPP_URL = os.getenv("OVA_KOBOLDCPP_URL", "http://localhost:5001")
+OVA_KOKORO_VOICE = os.getenv("OVA_KOKORO_VOICE", "af_heart")
 OVA_POCKET_TTS_VOICE = os.getenv("OVA_POCKET_TTS_VOICE", "alba")
 
 
@@ -34,6 +35,7 @@ pipeline = OVAPipeline(
     llm_backend=OVA_LLM_BACKEND,
     llm_model=OVA_LLM_MODEL or None,
     koboldcpp_url=OVA_KOBOLDCPP_URL,
+    kokoro_voice=OVA_KOKORO_VOICE,
     pocket_tts_voice=OVA_POCKET_TTS_VOICE,
 )
 
@@ -100,6 +102,7 @@ async def get_config():
 
 class ConfigUpdate(BaseModel):
     tts_engine: str | None = None
+    kokoro_voice: str | None = None
     pocket_tts_voice: str | None = None
     llm_backend: str | None = None
     llm_model: str | None = None
@@ -114,6 +117,12 @@ async def update_config(update: ConfigUpdate):
     if update.tts_engine is not None:
         try:
             pipeline.set_tts_engine(update.tts_engine)
+        except ValueError as e:
+            errors.append(str(e))
+
+    if update.kokoro_voice is not None:
+        try:
+            pipeline.set_kokoro_voice(update.kokoro_voice)
         except ValueError as e:
             errors.append(str(e))
 
@@ -148,6 +157,6 @@ async def update_config(update: ConfigUpdate):
 @app.get("/voices")
 async def get_voices():
     return JSONResponse(content={
+        "kokoro": KOKORO_VOICES,
         "pocket_tts": POCKET_TTS_VOICES,
-        "kokoro": ["af_heart"],
     })
