@@ -4,6 +4,18 @@ set -euo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
+# Source .env early so its values feed into the defaults below.
+# Shell env vars still win (they're already set before this runs).
+if [[ -f "$ROOT_DIR/.env" ]]; then
+  while IFS='=' read -r key value; do
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    key="${key// /}"
+    if [[ -z "${!key+x}" ]]; then
+      export "$key=$value"
+    fi
+  done < "$ROOT_DIR/.env"
+fi
+
 OVA_DIR="$ROOT_DIR/.ova"
 BACKEND_PID="$OVA_DIR/backend.pid"
 BACKEND_GROUP="$OVA_DIR/backend.group"
@@ -446,20 +458,14 @@ case "$cmd" in
     ensure_uv_lock
     ensure_env
 
-    # Source .env so the installer uses the values the user just chose.
-    # Only sets vars that aren't already exported in the shell.
+    # Re-source .env in case ensure_env just created it (the top-of-script
+    # source ran before the file existed on a fresh install).
     if [[ -f "$ROOT_DIR/.env" ]]; then
       while IFS='=' read -r key value; do
-        # skip comments/blanks
         [[ -z "$key" || "$key" == \#* ]] && continue
-        # strip surrounding whitespace
         key="${key// /}"
-        # only set if not already in the environment
-        if [[ -z "${!key+x}" ]]; then
-          export "$key=$value"
-        fi
+        export "$key=$value"
       done < "$ROOT_DIR/.env"
-      # refresh local copies
       OVA_TTS_ENGINE="${OVA_TTS_ENGINE:-kokoro}"
       OVA_LLM_BACKEND="${OVA_LLM_BACKEND:-ollama}"
     fi
